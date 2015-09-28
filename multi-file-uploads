@@ -1,0 +1,310 @@
+class uploadFile{
+
+
+    protected static $user_table = "members";
+    protected static $post_table = "posts";
+    protected static $post_images = "postImages";
+    protected static $post_comments = "postComments";
+    protected $longString = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    protected static $uploadOk;
+    protected $filename;
+    protected $messages = array();
+    protected static $destionation;
+    protected $maxSize = 7340032;
+    protected $permittedTypes = array(
+        'image/jpeg',
+        'image/pjpeg',
+        'image/gif',
+        'image/png',
+        'image/webp',
+        'image/jpg',
+        'image/JPEG',
+        'image/PJPEG',
+        'image/GIF',
+        'image/PNG',
+        'image/WEBP',
+        'image/JPG',
+        'video/mp4',
+        'video/m4v',
+        'video/mp3',
+        'video/ogg',
+        'video/mov',
+        'video/WebM',
+        'video/MP4',
+        'video/MP3',
+        'video/Ogg',
+        'video/MOV'
+    );
+    protected $newName;
+    protected $typeCheckingOn = true;
+    protected $notTrusted = array(
+        'bin',
+        'cgi',
+        'exe',
+        'js',
+        'pl',
+        'php',
+        'py',
+        'sh',
+        'doc'
+    );
+    protected $suffix;
+    protected $renameDuplicates;
+
+
+/// START OF FUNCTIONS
+
+
+    public function __construct($upLoadFolder){
+        if(!is_dir($upLoadFolder)){
+            throw new \Exception("$upLoadFolder must be a writable folder.");
+        }elseif(!is_writable($upLoadFolder)){
+            throw new \Exception("$upLoadFolder must be a valid folder.");
+        }elseif($upLoadFolder[strlen($upLoadFolder)-1] != '/'){
+            $upLoadFolder .= '/';
+        }
+        self::$destionation = $upLoadFolder;
+    }
+
+         public function upload($renameDuplicates = true){
+            $this->renameDuplicates = $renameDuplicates;
+            $uploaded = current($_FILES);    
+        if(is_array($uploaded['name'])){
+             foreach ($uploaded['name'] as $key => $value) {
+                $current['name'] = $uploaded['name'][$key];
+                $current['tmp_name'] = $uploaded['tmp_name'][$key];
+                $current['type'] = $uploaded['type'][$key];
+                $current['size'] = $uploaded['size'][$key];
+                $current['error'] = $uploaded['error'][$key];
+                if($this->checkFile($current)){  
+                    $this->moveFile($current);
+                    $this->postFile($current);
+                 }     
+            }
+       
+        }else{
+            if($this->checkFile($uploaded)){ 
+                $this->moveFile($uploaded);
+                $this->postFile($uploaded);
+            }else{
+                $this->messages[] = "Something went wrong please try again.";
+            }
+        }
+    }
+    
+      
+
+        public static function convertToBytes($value){
+        $value = trim($value);
+        $last = strtolower($value[strlen($val) - 1]);
+        if(in_array($last, array('g', 'm', 'k'))){
+            switch($last){
+             case 'g':
+                $value *= 1024;
+            case 'm':
+                $value *= 1024;
+            case 'k':
+                $value *= 1024;
+            }
+        }
+        return $value;
+    }
+
+    public static function convertFromBytes($bytes){
+                    $bytes /= 1024;
+           if( $bytes > 1024){
+            return number_format($bytes/1024, 1) . ' MB';
+        }else{
+            return number_format($bytes, 1) . ' KB';
+        }
+
+    }
+
+    public function set_max_size($bytes){
+        $serverMax = self::convertToBytes(ini_get('upload_max_filesize'));
+        if($bytes > $serverMax){
+       $this->messages[] = "Max size can not exceed server limit " .self::convertFromBytes($serverMax); 
+     
+        }elseif(is_numeric($bytes) && $bytes > 0){
+        $this->maxSize = $bytes;
+            return true;
+        }
+
+    }
+
+    /// Protected Functions
+    
+    protected function db(){
+        $db = new MySQLDatabase();
+        return $db;
+    }
+
+    protected function get_suffix(){
+        $min = 5;
+        $max = 7;
+        $suffix = substr(str_shuffle($this->longstring), $min, $max);
+        return $suffix;
+    }
+
+
+    protected function checkName($file){
+        $this->newName = NULL;
+        $this->suffix = $this->get_suffix();
+        $noSpaces = str_replace('', '.', $file['name']);
+        $existing = scandir(self::$destionation);
+        if($noSpaces != $file['name']){
+         $this->newName = $noSpaces;
+        }
+        $nameParts = pathinfo($noSpaces);
+        $extention = isset($nameParts['extenstion']) ? $nameParts['extenstion'] : '';
+        if(!$this->typeCheckinOn && !empty($this->suffix)){
+            if(in_array($extention, $this->notTrusted) || empty($extention)){
+             $this->newName = $noSpaces . " _ " .$this->suffix;
+            }
+        }
+        if($this->renameDuplicates){
+            $name = isset($this->newName) ? $this->newName : $file['name'];
+            if(in_array($name, $existing)){
+             $i = 1;
+                do{
+                    $this->newName = $nameParts['name'] . '_' . $i++;
+                    if(!empty($extention)){
+                        $this->newName .= " .$extention";
+                    }
+                    if(in_array($extention, $this->notTrusted)){
+                     $this->newName .= $this->suffix;
+                    }
+                }while(in_array($this->newName, $existing));
+            }
+        }
+    }
+
+    protected function checkSize($file){
+        if($file['size'] == 0){
+            $this->messages[] = $file['name'] . " is empty";
+        }elseif($file['size'] > $this->maxSize){ 
+            $this->messages[] = $file['name'] . " File is to large. (Max: " . self::convertFromBytes($this->maxSize) . " ).";
+        }elseif($file['size'] < $this->maxSize){
+            return true;
+        }
+
+    }
+    
+
+    protected function checkType($file){
+            if(in_array($file['type'], $this->permittedTypes)){
+                return true;
+            }else{
+                $this->messages[] = $file['name'] . " is not a permitted file type.";
+                return false;
+            }
+    }
+
+    
+      protected function checkFile($file){
+       if($file['error'] != 0){
+           self::getErrorMessage($file);
+               }elseif($this->checkSize($file)){
+                   return true;
+       }else{
+           return false;
+       }
+       if($this->typeCheckingOn){
+           if($this->checkType($file)){
+              return true;
+            }else{
+                return false;
+            }
+       }else{
+        $this->checkName($file);
+             return true;
+       }
+    }
+
+    /// UPLOADS AND RESTRICTIONS
+    
+          protected function moveFile($file){
+        $filename = isset($this->newName) ? $this->newName : $file['name'];
+        $success = move_uploaded_file($file['tmp_name'], self::$destionation . $filename);
+        if($success){
+        $result = $file['name'] . " was uploaded";
+        if(!is_null($this->newName)){
+            $result .= " , and was renamed " . $this->newName;
+    }
+        $result .= ".";
+        $this->messages[] = $result;
+        }else{
+         $this->messages[] = "could not upload " . $file['name'];
+        }
+}
+        
+
+        public function postUser(){
+             $db = $this->db();
+             $username = $_SESSION['username'];
+            $user_id = $_SESSION['user_id'];
+                    $sqli = "SELECT * FROM " .self::$user_table. " WHERE username='$username' AND user_id='$user_id' LIMIT 1";
+                        $resulti = $db->query($sqli);
+                            $rowi = $db->fetch_assoc($resulti, MYSQLI_BOTH);
+            $firstname = $rowi['firstname'];
+            $lastname = $rowi['lastname'];
+                    $db->query("INSERT INTO " .self::$post_table. " (username, user_id, firstname, lastname) VALUES('$username', '$user_id', '$firstname', '$lastname')");
+     
+        }
+        
+         
+
+        protected function postFile($file){
+            $db = $this->db();
+            $username = $_SESSION['username'];
+            $user_id = $_SESSION['user_id'];
+                 
+            $filename = self::$destionation . $file['name'];
+
+                $sql = "SELECT post_id FROM " . self::$post_table. " WHERE username='$username' AND user_id='$user_id' ORDER BY post_id DESC";
+                   $result = $db->query($sql);
+                       $row = $db->fetch_array($result, MYSQLI_BOTH);
+                            $post_id = $row['post_id'];
+              $db->query("INSERT INTO " .self::$post_images. " (post_id, filename) VALUES('$post_id', '$filename')");      
+        }
+
+
+                protected function allowAllTypes($suffix = null){
+     $this->typeCheckingOn = false;
+     $this->suffix = $this->get_suffix();
+        if(!is_null($this->suffix)){
+            if(strpos($this->suffix, '.') == 0 || $this->suffix == ''){
+                $this->suffix = $suffix;
+            }else{
+             $this->suffix = ".$suffix";
+            }
+        }
+    }
+
+    
+    protected static function getErrorMessage($file){
+        switch($file['error']){
+        
+        case 2:
+                    $this->messages[] = $file['name'] . "is to large: (Max: " .self::convertFromBytes($this->maxSize) . " ).";
+                break;
+            case 3:
+                    $this->messages[] = $file['name'] . "was only half uplaoded.";
+                break;
+            case 4:
+                    $this->messages[] = "no file selected.";
+                break;
+            default:
+                    $this->messages[] = "sorry something went wrong with the upload. " . $file['name'];
+                break;
+
+        }
+    }
+
+    public function getMessages(){
+        return $this->messages;
+    }
+
+  
+    
+}
